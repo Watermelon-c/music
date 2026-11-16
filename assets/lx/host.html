@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LX Source Host</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: transparent; }
+  </style>
+</head>
+<body>
+<script>
+/*
+ * LX 自定义源宿主（运行在隐藏 WebView 里）
+ *
+ * 每个音源脚本都跑在独立的 “假 globalThis” 里，互不干扰：
+ *   (new Function('globalThis', 'window', 'self', code))(g, g, g)
+ *
+ * 与 Flutter 的通信全部走 LxBridge 通道，消息都是 JSON 字符串：
+ *   JS -> Dart: { type: 'http', rid, url, options }   请求网络
+ *   JS -> Dart: { type: 'inited', id, sources }       脚本初始化完成
+ *   JS -> Dart: { type: 'result', rid, url }          解析到播放地址
+ *   JS -> Dart: { type: 'fail', rid, message }        解析失败
+ *   JS -> Dart: { type: 'error', id, message }        脚本执行异常
+ *   Dart -> JS: window.__lxHttpDone(rid, payload)     网络结果回填
+ */
+(function () {
+  var EVENT = { inited: 'inited', request: 'request', updateAlert: 'updateAlert' };
+  var sources = Object.create(null);
+  var pendingHttp = Object.create(null);
+  var httpSeq = 0;
+
+  function post(obj) {
+    try {
+      if (window.LxBridge && window.LxBridge.postMessage) {
+        window.LxBridge.postMessage(JSON.stringify(obj));
+      }
+    } catch (e) {
+      /* 忽略桥接异常 */
+    }
+  }
+
+  /* ---------------- 字节 / Buffer ---------------- */
+  function utf8ToBytes(str) {
+    return new TextEncoder().encode(str);
+  }
+
+  function bytesToUtf8(bytes) {
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+
+  function bytesToB64(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+
+  function b64ToBytes(b64) {
+    var bin = atob(b64);
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function hexToBytes(hex) {
+    var clean = String(hex).replace(/[^0-9a-fA-F]/g, '');
+    var out = new Uint8Array(Math.floor(clean.length / 2));
+    for (var i = 0; i < out.length; i++) {
+      out[i] = parseInt(clean.substr(i * 2, 2), 16);
+    }
+    return out;
+  }
+
+  function bytesToHex(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, '0');
+    return s;
+  }
+
+  function Buf(bytes) {
+    this.bytes = bytes;
+    this.length = bytes.length;
+  }
+
+  Buf.prototype.toString = function (encoding) {
+    var enc = String(encoding || 'utf8').toLowerCase().replace('-', '');
+    if (enc === 'base64') return bytesToB64(this.bytes);
+    if (enc === 'hex') return bytesToHex(this.bytes);
+    return bytesToUtf8(this.bytes);
+  };
+
+  var buffer = {
+    from: function (input, encoding) {
+      if (typeof input === 'string') {
+        var enc = String(encoding || 'utf8').toLowerCase();
+        if (enc === 'base64') return new Buf(b64ToBytes(input));
+        if (enc === 'hex') return new Buf(hexToBytes(input));
+        return new Buf(utf8ToBytes(input));
+      }
+      if (input instanceof Uint8Array) return new Buf(input);
+      if (input && input.bytes instanceof Uint8Array) return new Buf(input.bytes);
+      if (Array.isArray(input)) return new Buf(new Uint8Array(input));
+      throw new Error('buffer.from 不支持该类型');
+    },
+    bufToString: function (buf, encoding) {
+      if (buf instanceof Buf) return buf.toString(encoding);
+      if (buf instanceof Uint8Array) return new Buf(buf).toString(encoding);
+      if (buf && buf.bytes instanceof Uint8Array) return new Buf(buf.bytes).toString(encoding);
+      if (Array.isArray(buf)) return new Buf(new Uint8Array(buf)).toString(encoding);
+      return String(buf);
+    },
+    alloc: function (n) {
+      return new Buf(new Uint8Array(n));
+    },
+  };
+
+  /* ---------------- crypto / zlib ---------------- */
+  function notSupported(name) {
+    return function () {
+      throw new Error('当前 App 未实现 lx.utils.' + name);
+    };
+  }
+
+  var cryptoObj = {
+    md5: function (input) {
+      if (typeof globalThis.__md5 !== 'function') throw new Error('md5 模块未加载');
+      return globalThis.__md5(String(input));
+    },
+    randomBytes: function (size) {
+      var n = Number(size) || 8;
+      var out = '';
+      for (var i = 0; i < n; i++) out += Math.floor(Math.random() * 16).toString(16);
+      return out;
+    },
+    aesEncrypt: notSupported('crypto.aesEncrypt'),
+    rsaEncrypt: notSupported('crypto.rsaEncrypt'),
+  };
+
+  var zlib = {
+    inflate: notSupported('zlib.inflate'),
+    deflate: notSupported('zlib.deflate'),
+  };
+
+  /* ---------------- 单个音源的 lx 实例 ---------------- */
+  function createLx(id, state) {
+    return {
+      version: 2,
+      env: 'mobile',
+      currentScriptInfo: state.info || {},
+      EVENT_NAMES: EVENT,
+      on: function (event, handler) {
+        state.handlers[event] = handler;
+      },
+      send: function (event, data) {
+        if (event === 'inited') {
+          state.sources = (data && data.sources) || {};
+          post({ type: 'inited', id: id, sources: state.sources });
+        } else if (event === 'updateAlert') {
+          post({ type: 'updateAlert', id: id, data: data || {} });
+        } else {
+          post({ type: 'event', id: id, event: event });
+        }
+      },
+      request: function (url, options, callback) {
+        if (typeof callback !== 'function') throw new Error('lx.request 需要回调');
+        var rid = 'h' + ++httpSeq;
+        pendingHttp[rid] = callback;
+        post({ type: 'http', rid: rid, url: String(url), options: options || {} });
+        return function () {
+          delete pendingHttp[rid];
+        };
+      },
+      utils: { buffer: buffer, crypto: cryptoObj, zlib: zlib },
+    };
+  }
+
+  /* ---------------- 对外接口 ---------------- */
+  window.__lxAddSource = function (code, id, infoJson) {
+    try {
+      var info = {};
+      try {
+        info = infoJson ? JSON.parse(infoJson) : {};
+      } catch (e) {
+        info = {};
+      }
+      var state = { handlers: {}, sources: null, info: info };
+      // 用原型链继承真实全局对象，脚本里 window / self 都指向它，
+      // 这样既能拿到所有内置 API，又能让每个音源的 lx 互相隔离。
+      var g = Object.create(typeof globalThis !== 'undefined' ? globalThis : window);
+      g.lx = createLx(id, state);
+      g.window = g;
+      g.self = g;
+      state.global = g;
+      sources[id] = state;
+      var fn = new Function('globalThis', 'window', 'self', code);
+      fn(g, g, g);
+    } catch (e) {
+      delete sources[id];
+      post({ type: 'error', id: id, message: String((e && e.stack) || (e && e.message) || e) });
+    }
+  };
+
+  window.__lxRemoveSource = function (id) {
+    delete sources[id];
+  };
+
+  window.__lxRequest = function (rid, id, platform, quality, musicInfo) {
+    var state = sources[id];
+    if (typeof musicInfo === 'string') {
+      try {
+        musicInfo = JSON.parse(musicInfo);
+      } catch (e) {
+        musicInfo = {};
+      }
+    }
+    if (!state) {
+      post({ type: 'fail', rid: rid, message: '音源「' + id + '」未加载' });
+      return;
+    }
+    var handler = state.handlers[EVENT.request];
+    if (typeof handler !== 'function') {
+      post({ type: 'fail', rid: rid, message: '音源未注册 request 事件' });
+      return;
+    }
+    Promise.resolve()
+      .then(function () {
+        return handler({
+          source: platform,
+          action: 'musicUrl',
+          info: { type: quality, musicInfo: musicInfo },
+        });
+      })
+      .then(function (url) {
+        if (typeof url === 'string' && url.length > 4) {
+          post({ type: 'result', rid: rid, url: url });
+        } else {
+          post({ type: 'fail', rid: rid, message: '音源没有返回有效地址' });
+        }
+      })
+      .catch(function (e) {
+        var msg = e && e.message ? e.message : String(e);
+        post({ type: 'fail', rid: rid, message: msg });
+      });
+  };
+
+  window.__lxHttpDone = function (rid, payloadJson) {
+    var cb = pendingHttp[rid];
+    if (typeof cb !== 'function') return;
+    delete pendingHttp[rid];
+    var payload;
+    try {
+      payload = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson;
+    } catch (e) {
+      payload = { __error: '响应解析失败' };
+    }
+    if (payload && payload.__error) {
+      cb(new Error(String(payload.__error)));
+      return;
+    }
+    cb(null, {
+      body: payload.body,
+      statusCode: payload.statusCode,
+      url: payload.url,
+      headers: payload.headers || {},
+    });
+  };
+
+  post({ type: 'ready' });
+})();
+</script>
+</body>
+</html>
