@@ -5,9 +5,11 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'models/lyric.dart';
 import 'models/models.dart';
 import 'services/kugou_api.dart';
 import 'services/lx_host.dart';
+import 'services/lyric_api.dart';
 import 'services/player_service.dart';
 
 class PresetSource {
@@ -87,6 +89,7 @@ class AppState extends ChangeNotifier {
     );
     kugou = KugouApi(dio);
     host = LxHost(dio);
+    lyricApi = LyricApi(dio);
     player = PlayerService();
     player.addListener(notifyListeners);
   }
@@ -94,6 +97,7 @@ class AppState extends ChangeNotifier {
   late final Dio dio;
   late final KugouApi kugou;
   late final LxHost host;
+  late final LyricApi lyricApi;
   late final PlayerService player;
 
   SharedPreferences? _prefs;
@@ -178,7 +182,46 @@ class AppState extends ChangeNotifier {
   }
 
   // -------------------------------------------------------------------- 播放
+  List<Song> queue = <Song>[];
+  int queueIndex = -1;
+  Lyric lyric = Lyric.empty;
+  bool lyricLoading = false;
+
+  final Map<String, _CachedUrl> _urlCache = <String, _CachedUrl>{};
+  int _playToken = 0;
+
+  void _syncQueue(Song song) {
+    final int i = results.indexWhere((Song s) => s.key == song.key);
+    if (i >= 0) {
+      queue = List<Song>.from(results);
+      queueIndex = i;
+      return;
+    }
+    final int j = favorites.indexWhere((Song s) => s.key == song.key);
+    if (j >= 0) {
+      queue = List<Song>.from(favorites);
+      queueIndex = j;
+      return;
+    }
+    queue = <Song>[song];
+    queueIndex = 0;
+  }
+
+  Future<void> nextSong() async {
+    if (queue.isEmpty) return;
+    final int next = (queueIndex + 1) % queue.length;
+    await play(queue[next]);
+  }
+
+  Future<void> previousSong() async {
+    if (queue.isEmpty) return;
+    final int prev = (queueIndex - 1 + queue.length) % queue.length;
+    await play(queue[prev]);
+  }
+
   Future<void> play(Song song) async {
+    _syncQueue(song);
+
     final List<SourceEntry> active = sources
         .where((SourceEntry s) =>
             s.enabled &&
@@ -191,44 +234,112 @@ class AppState extends ChangeNotifier {
       return;
     }
 
+    final int token = ++_playToken;
     busy = true;
     notice = null;
+    lyric = Lyric.empty;
+    lyricLoading = true;
     notifyListeners();
 
-    final List<String> tried = <String>[];
+    // 1) 直链缓存（10 分钟内有效），重播同一首基本秒开
+    final String cacheKey = '${song.key}|$quality';
+    final _CachedUrl? cached = _urlCache[cacheKey];
+    if (cached != null &&
+        DateTime.now().difference(cached.at).inMinutes < 10) {
+      await player.playUrl(
+        song,
+        cached.url,
+        headers: <String, String>{'User-Agent': KugouApi.userAgent},
+      );
+      busy = false;
+      lyricLoading = false;
+      notifyListeners();
+      unawaited(_loadLyric(song, token));
+      return;
+    }
+
+    // 2) 所有音源 + 两档音质并发抢答，谁先返回有效地址就用谁
     final List<String> qualities = <String>[
       quality,
       if (quality != '128k') '128k',
     ];
-
+    final List<Future<String>> attempts = <Future<String>>[];
+    final List<String> labels = <String>[];
     for (final String q in qualities) {
       for (final SourceEntry s in active) {
-        try {
-          final String url = await host.resolve(
+        labels.add('${s.name}($q)');
+        attempts.add(
+          host.resolve(
             sourceId: s.id,
             platform: song.source,
             quality: q,
             musicInfo: song.toMusicInfo(),
-          );
-          await player.playUrl(
-            song,
-            url,
-            headers: <String, String>{'User-Agent': KugouApi.userAgent},
-          );
-          busy = false;
-          notifyListeners();
-          return;
-        } catch (e) {
-          tried.add('${s.name}($q): $e');
-        }
+          ),
+        );
       }
     }
 
-    busy = false;
-    notice = '所有音源都没解析出地址（多半是这个音源的后端挂了）。\n'
-        '去「音源」页点「一键导入全部推荐音源」，再回来重试。\n'
-        '${tried.take(2).join('\n')}';
-    notifyListeners();
+    try {
+      final String url = await _firstSuccess(attempts)
+          .timeout(const Duration(seconds: 18));
+      if (token != _playToken) return;
+
+      _urlCache[cacheKey] = _CachedUrl(url, DateTime.now());
+      if (_urlCache.length > 60) _urlCache.clear();
+
+      await player.playUrl(
+        song,
+        url,
+        headers: <String, String>{'User-Agent': KugouApi.userAgent},
+      );
+      busy = false;
+      lyricLoading = false;
+      notifyListeners();
+      unawaited(_loadLyric(song, token));
+    } catch (e) {
+      if (token != _playToken) return;
+      busy = false;
+      lyricLoading = false;
+      notice = '所有音源都没解析出地址（多半是音源后端挂了）。\n'
+          '去「音源」页点「一键导入全部推荐音源」，再回来重试。';
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadLyric(Song song, int token) async {
+    try {
+      final Lyric result = await lyricApi.fetch(song);
+      if (token != _playToken) return;
+      lyric = result;
+    } catch (_) {
+      if (token != _playToken) return;
+      lyric = Lyric.empty;
+    } finally {
+      if (token == _playToken) {
+        lyricLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// 返回第一个成功的 Future，全部失败才抛错
+  Future<String> _firstSuccess(List<Future<String>> futures) {
+    final Completer<String> completer = Completer<String>();
+    int remaining = futures.length;
+    for (final Future<String> f in futures) {
+      f.then(
+        (String value) {
+          if (!completer.isCompleted) completer.complete(value);
+        },
+        onError: (Object error) {
+          remaining -= 1;
+          if (remaining == 0 && !completer.isCompleted) {
+            completer.completeError(error);
+          }
+        },
+      );
+    }
+    return completer.future;
   }
 
   /// 一键导入所有还没导入的推荐音源，返回结果描述
@@ -379,4 +490,11 @@ class AppState extends ChangeNotifier {
     player.dispose();
     super.dispose();
   }
+}
+
+class _CachedUrl {
+  const _CachedUrl(this.url, this.at);
+
+  final String url;
+  final DateTime at;
 }

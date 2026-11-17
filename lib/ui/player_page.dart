@@ -1,12 +1,60 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../models/models.dart';
+import 'lyric_view.dart';
 
-class PlayerPage extends StatelessWidget {
+class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
+
+  @override
+  State<PlayerPage> createState() => _PlayerPageState();
+}
+
+class _PlayerPageState extends State<PlayerPage>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _spin;
+  AudioPlayer? _player;
+  StreamSubscription<PlayerState>? _sub;
+  bool _showLyric = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _spin = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 24),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final AudioPlayer p = context.read<AppState>().player.player;
+    if (!identical(_player, p)) {
+      _sub?.cancel();
+      _player = p;
+      _sub = p.playerStateStream.listen((PlayerState state) {
+        if (state.playing) {
+          if (!_spin.isAnimating) _spin.repeat();
+        } else {
+          _spin.stop();
+        }
+      });
+      if (p.playing) _spin.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _spin.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -21,80 +69,217 @@ class PlayerPage extends StatelessWidget {
     }
 
     final AudioPlayer player = app.player.player;
-    final bool fav = app.isFavorite(song);
-    final TextTheme text = Theme.of(context).textTheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('正在播放')),
-      body: SafeArea(
-        child: Column(
-          children: <Widget>[
-            const Spacer(),
-            Container(
-              width: 220,
-              height: 220,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(24),
-                gradient: const LinearGradient(
-                  colors: <Color>[Color(0xFF7C4DFF), Color(0xFF03A9F4)],
-                ),
-              ),
-              child: const Icon(Icons.music_note, size: 96, color: Colors.white70),
+      body: GestureDetector(
+        onVerticalDragEnd: (DragEndDetails details) {
+          final double v = details.primaryVelocity ?? 0;
+          if (v < -250) {
+            app.nextSong();
+          } else if (v > 250) {
+            app.previousSong();
+          }
+        },
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: <Color>[Color(0xFF4A3423), Color(0xFF1B120B)],
             ),
-            const SizedBox(height: 28),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                song.name,
-                style: text.headlineSmall,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                '${song.singer} · ${song.album}',
-                style: text.bodyMedium,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+          ),
+          child: SafeArea(
+            child: Column(
               children: <Widget>[
-                IconButton(
-                  icon: Icon(
-                    fav ? Icons.favorite : Icons.favorite_border,
-                    color: fav ? Colors.redAccent : null,
+                _buildTopBar(context, app, song),
+                Expanded(
+                  child: _showLyric
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 28),
+                          child: LyricView(
+                            lyric: app.lyric,
+                            player: player,
+                            loading: app.lyricLoading,
+                          ),
+                        )
+                      : _buildCover(app, song),
+                ),
+                if (app.busy)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 6),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                      ),
+                    ),
                   ),
-                  onPressed: () => app.toggleFavorite(song),
-                ),
-                Text(
-                  '${app.quality} · ${song.source.toUpperCase()}',
-                  style: text.bodySmall,
-                ),
+                _buildInfo(context, app, song),
+                _buildProgress(context, player),
+                _buildControls(app),
+                const SizedBox(height: 18),
               ],
             ),
-            if (app.player.lastError != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-                child: Text(
-                  app.player.lastError!,
-                  style: const TextStyle(color: Colors.redAccent),
-                  textAlign: TextAlign.center,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopBar(BuildContext context, AppState app, Song song) {
+    return Row(
+      children: <Widget>[
+        IconButton(
+          icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        Expanded(
+          child: Column(
+            children: <Widget>[
+              Text(
+                _showLyric ? song.name : '正在播放',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white, fontSize: 16),
+              ),
+              if (_showLyric)
+                Text(
+                  song.singer,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+            ],
+          ),
+        ),
+        IconButton(
+          tooltip: _showLyric ? '看封面' : '看歌词',
+          icon: Icon(
+            _showLyric ? Icons.album_outlined : Icons.lyrics_outlined,
+            color: Colors.white,
+          ),
+          onPressed: () => setState(() => _showLyric = !_showLyric),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCover(AppState app, Song song) {
+    return GestureDetector(
+      onTap: () => setState(() => _showLyric = true),
+      child: Center(
+        child: SizedBox(
+          width: 300,
+          height: 300,
+          child: Stack(
+            alignment: Alignment.center,
+            children: <Widget>[
+              RotationTransition(
+                turns: _spin,
+                child: Container(
+                  width: 290,
+                  height: 290,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const RadialGradient(
+                      colors: <Color>[Color(0xFF2A2A2A), Color(0xFF0B0B0B)],
+                    ),
+                    boxShadow: <BoxShadow>[
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.45),
+                        blurRadius: 24,
+                        offset: const Offset(0, 12),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: Container(
+                      width: 148,
+                      height: 148,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: <Color>[Color(0xFFF3E0C4), Color(0xFF8C6B47)],
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.music_note,
+                        size: 64,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            const Spacer(),
-            _buildProgress(context, player),
-            _buildControls(app, player),
-            const SizedBox(height: 24),
-          ],
+              Positioned(
+                top: 2,
+                right: 24,
+                child: Transform.rotate(
+                  angle: 0.55,
+                  alignment: Alignment.topCenter,
+                  child: Container(
+                    width: 9,
+                    height: 112,
+                    decoration: BoxDecoration(
+                      color: Colors.white70,
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildInfo(BuildContext context, AppState app, Song song) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
+      child: Column(
+        children: <Widget>[
+          Text(
+            song.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 21,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Flexible(
+                child: Text(
+                  '${song.singer} · ${song.album}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  '${app.quality} · ${song.source.toUpperCase()}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 10),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -112,20 +297,35 @@ class PlayerPage extends StatelessWidget {
 
         return Column(
           children: <Widget>[
-            Slider(
-              min: 0,
-              max: max,
-              value: value,
-              onChanged: (double v) =>
-                  player.seek(Duration(milliseconds: v.round())),
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 2,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                activeTrackColor: Colors.white,
+                inactiveTrackColor: Colors.white24,
+                thumbColor: Colors.white,
+              ),
+              child: Slider(
+                min: 0,
+                max: max,
+                value: value,
+                onChanged: (double v) =>
+                    player.seek(Duration(milliseconds: v.round())),
+              ),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: <Widget>[
-                  Text(_fmt(pos), style: Theme.of(context).textTheme.bodySmall),
-                  Text(_fmt(total), style: Theme.of(context).textTheme.bodySmall),
+                  Text(
+                    _fmt(pos),
+                    style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  ),
+                  Text(
+                    _fmt(total),
+                    style: const TextStyle(color: Colors.white54, fontSize: 11),
+                  ),
                 ],
               ),
             ),
@@ -135,46 +335,47 @@ class PlayerPage extends StatelessWidget {
     );
   }
 
-  Widget _buildControls(AppState app, AudioPlayer player) {
-    return StreamBuilder<PlayerState>(
-      stream: player.playerStateStream,
-      builder: (BuildContext context, AsyncSnapshot<PlayerState> snapshot) {
-        final bool playing = snapshot.data?.playing ?? false;
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            IconButton(
-              iconSize: 38,
-              icon: const Icon(Icons.replay_10),
-              onPressed: () {
-                final Duration target =
-                    player.position - const Duration(seconds: 10);
-                player.seek(target.isNegative ? Duration.zero : target);
-              },
-            ),
-            const SizedBox(width: 18),
-            FilledButton(
-              onPressed: () => app.player.toggle(),
-              style: FilledButton.styleFrom(
-                shape: const CircleBorder(),
-                padding: const EdgeInsets.all(18),
+  Widget _buildControls(AppState app) {
+    final AudioPlayer player = app.player.player;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: <Widget>[
+        IconButton(
+          iconSize: 30,
+          color: Colors.white,
+          icon: const Icon(Icons.skip_previous),
+          onPressed: () => app.previousSong(),
+        ),
+        StreamBuilder<PlayerState>(
+          stream: player.playerStateStream,
+          builder: (BuildContext context, AsyncSnapshot<PlayerState> snapshot) {
+            final bool playing = snapshot.data?.playing ?? false;
+            return GestureDetector(
+              onTap: () => app.player.toggle(),
+              child: Container(
+                width: 68,
+                height: 68,
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  playing ? Icons.pause : Icons.play_arrow,
+                  size: 40,
+                  color: const Color(0xFF1B120B),
+                ),
               ),
-              child: Icon(playing ? Icons.pause : Icons.play_arrow, size: 36),
-            ),
-            const SizedBox(width: 18),
-            IconButton(
-              iconSize: 38,
-              icon: const Icon(Icons.forward_30),
-              onPressed: () {
-                final Duration total = player.duration ?? Duration.zero;
-                final Duration target =
-                    player.position + const Duration(seconds: 30);
-                player.seek(target > total && !total.isNegative ? total : target);
-              },
-            ),
-          ],
-        );
-      },
+            );
+          },
+        ),
+        IconButton(
+          iconSize: 30,
+          color: Colors.white,
+          icon: const Icon(Icons.skip_next),
+          onPressed: () => app.nextSong(),
+        ),
+      ],
     );
   }
 
