@@ -5,8 +5,9 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+# 发布 Release 需要写权限
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -50,7 +51,43 @@ jobs:
       - name: 构建 release APK
         run: flutter build apk --release
 
-      - name: 上传安装包
+      - name: 读取版本号
+        id: ver
+        run: |
+          VERSION=$(grep -m1 '^version:' pubspec.yaml | cut -d' ' -f2)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "版本: $VERSION"
+
+      # 让 latest 这个 tag 每次都指向最新提交，下载链接保持不变
+      - name: 清理旧的 latest Release
+        run: gh release delete latest --yes --cleanup-tag || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 发布到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: LX 播放器 ${{ steps.ver.outputs.version }}
+          make_latest: true
+          body: |
+            LX 播放器（个人自用）自动构建
+
+            - 版本：${{ steps.ver.outputs.version }}
+            - 提交：${{ github.sha }}
+            - 构建时间：${{ github.run_started_at }}
+
+            下载：`app-release.apk`（Android，允许未知来源后直接安装）
+
+            手机下载慢的话，把下面的链接前面加上镜像前缀：
+
+            ```
+            https://gh-proxy.org/ + https://github.com/${{ github.repository }}/releases/download/latest/app-release.apk
+            ```
+          files: build/app/outputs/flutter-apk/app-release.apk
+          fail_on_unmatched_files: true
+
+      - name: 上传安装包（Artifacts，可选）
         uses: actions/upload-artifact@v4
         with:
           name: lx-music-apk

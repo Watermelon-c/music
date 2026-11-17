@@ -40,9 +40,29 @@
    > 但要保证 `.github/workflows/build-apk.yml` 也在里面。
 
 3. 打开仓库页面的 **Actions** 标签，会看到 `build-apk` 正在跑（第一次约 5–10 分钟）。
-4. 跑完后点进这次运行，页面底部 **Artifacts** 里下载 `lx-music-apk`（是个 zip）。
-5. 解压得到 `app-release.apk`，传到手机上安装（需要允许“安装未知来源应用”）。
+4. 构建完成后有两种拿 APK 的方式：
+
+   **① 直接下（推荐，不用登录，手机也能直接点开）**
+
+   打开仓库的 **Releases** 页面，在 `latest` 这条里点 **`app-release.apk`**。
+   国内网络慢的话，在链接前面加镜像前缀：
+
+   ```
+   https://gh-proxy.org/https://github.com/<你的用户名>/<仓库>/releases/download/latest/app-release.apk
+   ```
+
+   其他可用镜像：`https://ghfast.top/`、`https://ghproxy.net/`、`https://gh.llkk.cc/`
+
+   **② 从 Actions 的 Artifacts 下（需要登录）**
+
+   点进这次运行，页面底部 **Artifacts** → `lx-music-apk`（zip，解压后是 `app-release.apk`）。
+
+5. 传到手机上安装（需要允许“安装未知来源应用”）。
    这个包用 debug 证书签名，能直接装，但**不能上架应用商店**。
+
+> 每次 `git push` 到 `main` 都会重新构建并**覆盖更新** `latest` 这个 Release，
+> 所以上面的下载链接长期有效，有新版本重新下一次即可。
+
 
 ## 第一次打开怎么用
 
