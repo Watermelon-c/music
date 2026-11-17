@@ -174,6 +174,47 @@
     };
   }
 
+  /* ---------------- 每个音源独立的“假全局” ---------------- */
+
+  // 不能直接用 Object.create(window)：window 上很多原生属性是带 setter 的访问器，
+  // 往派生对象上赋值时 this 不是真正的 Window，Chrome 会抛 "Illegal invocation"。
+  // 用 Proxy 转发：读的时候以真正的 window 为 receiver 取值，写的时候落在自己的表里。
+  function createSandboxGlobal(id, state, lxObj) {
+    var own = { lx: lxObj };
+    var proxy = null;
+
+    if (typeof Proxy === 'function') {
+      proxy = new Proxy(own, {
+        get: function (target, prop) {
+          if (prop in target) return target[prop];
+          if (prop === 'window' || prop === 'self' || prop === 'globalThis') return proxy;
+          return window[prop];
+        },
+        set: function (target, prop, value) {
+          target[prop] = value;
+          return true;
+        },
+        has: function (target, prop) {
+          return prop in target || prop in window;
+        },
+      });
+      return proxy;
+    }
+
+    // 极老 WebView 没有 Proxy 时的兜底
+    var g = Object.create(window);
+    try {
+      Object.defineProperty(g, 'lx', { value: lxObj, writable: true, configurable: true });
+    } catch (e) {}
+    try {
+      Object.defineProperty(g, 'window', { value: g, writable: true, configurable: true });
+    } catch (e) {}
+    try {
+      Object.defineProperty(g, 'self', { value: g, writable: true, configurable: true });
+    } catch (e) {}
+    return g;
+  }
+
   /* ---------------- 对外接口 ---------------- */
   window.__lxAddSource = function (code, id, infoJson) {
     try {
@@ -184,12 +225,8 @@
         info = {};
       }
       var state = { handlers: {}, sources: null, info: info };
-      // 用原型链继承真实全局对象，脚本里 window / self 都指向它，
-      // 这样既能拿到所有内置 API，又能让每个音源的 lx 互相隔离。
-      var g = Object.create(typeof globalThis !== 'undefined' ? globalThis : window);
-      g.lx = createLx(id, state);
-      g.window = g;
-      g.self = g;
+      var sandboxLx = createLx(id, state);
+      var g = createSandboxGlobal(id, state, sandboxLx);
       state.global = g;
       sources[id] = state;
       var fn = new Function('globalThis', 'window', 'self', code);
