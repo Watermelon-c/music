@@ -19,12 +19,8 @@ class PresetSource {
 /// 内置推荐音源（来自 pdone/lx-music-source，走 GitHub 加速链接）
 const List<PresetSource> kPresetSources = <PresetSource>[
   PresetSource(
-    'HelloWorld 聚合',
+    'HelloWorld',
     'https://gh-proxy.org/raw.githubusercontent.com/pdone/lx-music-source/main/helloworld/latest.js',
-  ),
-  PresetSource(
-    'LX',
-    'https://gh-proxy.org/raw.githubusercontent.com/pdone/lx-music-source/main/lx/latest.js',
   ),
   PresetSource(
     'ChangQing',
@@ -41,6 +37,42 @@ const List<PresetSource> kPresetSources = <PresetSource>[
   PresetSource(
     'SixYin',
     'https://gh-proxy.org/raw.githubusercontent.com/pdone/lx-music-source/main/sixyin/latest.js',
+  ),
+  PresetSource(
+    'QingLiang',
+    'https://gh-proxy.org/raw.githubusercontent.com/pdone/lx-music-source/main/qingliang/latest.js',
+  ),
+  PresetSource(
+    'SuYin',
+    'https://gh-proxy.org/raw.githubusercontent.com/pdone/lx-music-source/main/suyin/latest.js',
+  ),
+  PresetSource(
+    'XingLan',
+    'https://gh-proxy.org/raw.githubusercontent.com/pdone/lx-music-source/main/xinglan/latest.js',
+  ),
+  PresetSource(
+    'FeiChangDao',
+    'https://gh-proxy.org/raw.githubusercontent.com/pdone/lx-music-source/main/feichangdao/latest.js',
+  ),
+  PresetSource(
+    'QDY',
+    'https://gh-proxy.org/raw.githubusercontent.com/pdone/lx-music-source/main/qdy/latest.js',
+  ),
+  PresetSource(
+    'JieXiang',
+    'https://gh-proxy.org/raw.githubusercontent.com/pdone/lx-music-source/main/jiexiang/latest.js',
+  ),
+  PresetSource(
+    'HuanYin',
+    'https://gh-proxy.org/raw.githubusercontent.com/pdone/lx-music-source/main/huanyin/latest.js',
+  ),
+  PresetSource(
+    'HYW',
+    'https://gh-proxy.org/raw.githubusercontent.com/pdone/lx-music-source/main/hyw/latest.js',
+  ),
+  PresetSource(
+    'LX',
+    'https://gh-proxy.org/raw.githubusercontent.com/pdone/lx-music-source/main/lx/latest.js',
   ),
 ];
 
@@ -65,6 +97,7 @@ class AppState extends ChangeNotifier {
   late final PlayerService player;
 
   SharedPreferences? _prefs;
+  int _sourceSeq = 0;
 
   List<Song> results = <Song>[];
   List<Song> favorites = <Song>[];
@@ -192,8 +225,34 @@ class AppState extends ChangeNotifier {
     }
 
     busy = false;
-    notice = '所有音源都没解析出地址，换首歌或换个音源试试\n${tried.take(2).join('\n')}';
+    notice = '所有音源都没解析出地址（多半是这个音源的后端挂了）。\n'
+        '去「音源」页点「一键导入全部推荐音源」，再回来重试。\n'
+        '${tried.take(2).join('\n')}';
     notifyListeners();
+  }
+
+  /// 一键导入所有还没导入的推荐音源，返回结果描述
+  Future<String> importAllPresets() async {
+    final Set<String> existed =
+        sources.map((SourceEntry s) => s.url).toSet();
+    final List<PresetSource> todo = kPresetSources
+        .where((PresetSource p) => !existed.contains(p.url))
+        .toList();
+    if (todo.isEmpty) return '推荐音源都已经导入过了';
+
+    busy = true;
+    notice = null;
+    notifyListeners();
+
+    int ok = 0;
+    await Future.wait(todo.map((PresetSource p) async {
+      final String? error = await importSource(p.url);
+      if (error == null) ok += 1;
+    }));
+
+    busy = false;
+    notifyListeners();
+    return '导入完成：成功 $ok / ${todo.length} 个';
   }
 
   // -------------------------------------------------------------------- 音源
@@ -203,7 +262,8 @@ class AppState extends ChangeNotifier {
 
     try {
       final String code = await _download(trimmed);
-      final String id = 'src_${DateTime.now().millisecondsSinceEpoch}';
+      _sourceSeq += 1;
+      final String id = 'src_${DateTime.now().microsecondsSinceEpoch}_$_sourceSeq';
       final Map<String, dynamic> caps =
           await host.addSource(id, code, name: _nameFromCode(code, trimmed));
 

@@ -33,7 +33,7 @@ jobs:
       - name: 生成 Android 平台文件
         run: |
           flutter --version
-          flutter create --platforms=android --org com.lxmusic --project-name lxmusic_app /tmp/scaffold
+          flutter create --platforms=android --org com.yezi --project-name music /tmp/scaffold
           rm -rf android
           cp -r /tmp/scaffold/android ./android
           ls android/app/src/main
@@ -68,14 +68,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: LX 播放器 ${{ steps.ver.outputs.version }}
+          name: 椰子音乐 ${{ steps.ver.outputs.version }}
           make_latest: true
           body: |
-            LX 播放器（个人自用）自动构建
+            椰子音乐（个人自用）自动构建
 
             - 版本：${{ steps.ver.outputs.version }}
             - 提交：${{ github.sha }}
-            - 构建时间：${{ github.run_started_at }}
+            - 构建时间：${{ github.event.head_commit.timestamp }}
 
             下载：`app-release.apk`（Android，允许未知来源后直接安装）
 

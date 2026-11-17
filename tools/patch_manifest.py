@@ -14,7 +14,7 @@ import re
 import sys
 from pathlib import Path
 
-APP_LABEL = "LX播放器"
+APP_LABEL = "椰子音乐"
 
 
 def patch(manifest: Path) -> None:

@@ -1,4 +1,4 @@
-# LX 播放器（个人自用）
+# 椰子音乐（个人自用）
 
 一个 Flutter 写的安卓音乐播放器：**酷狗搜索** + **LX 自定义音源解析播放地址** + 在线播放 / 收藏。
 没有服务器，没有账号，所有东西都在手机上跑。
@@ -30,7 +30,7 @@
    ```bash
    git init
    git add .
-   git commit -m "feat: 初始化 LX 播放器"
+   git commit -m "feat: 初始化椰子音乐"
    git branch -M main
    git remote add origin https://github.com/<你的用户名>/lx-player.git
    git push -u origin main
@@ -109,7 +109,7 @@ tools/
 装了 Flutter 之后：
 
 ```bash
-flutter create --platforms=android --org com.lxmusic --project-name lxmusic_app .
+flutter create --platforms=android --org com.yezi --project-name music .
 python3 tools/patch_manifest.py android/app/src/main/AndroidManifest.xml
 flutter pub get
 flutter run          # 连手机

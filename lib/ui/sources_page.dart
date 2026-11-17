@@ -25,6 +25,16 @@ class _SourcesPageState extends State<SourcesPage> {
     );
   }
 
+  Future<void> _importAll() async {
+    final AppState app = context.read<AppState>();
+    setState(() => _importing = true);
+    final String message = await app.importAllPresets();
+    if (!mounted) return;
+    setState(() => _importing = false);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _showImportDialog() async {
     final TextEditingController controller = TextEditingController();
     final String? url = await showDialog<String>(
@@ -131,8 +141,19 @@ class _SourcesPageState extends State<SourcesPage> {
           }),
           const Divider(),
           Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _importing ? null : _importAll,
+                icon: const Icon(Icons.download_for_offline),
+                label: const Text('一键导入全部推荐音源'),
+              ),
+            ),
+          ),
+          Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: Text('推荐音源（点击导入，来自 pdone/lx-music-source）',
+            child: Text('单个音源（点击导入，来自 pdone/lx-music-source）',
                 style: text.titleSmall),
           ),
           Padding(
