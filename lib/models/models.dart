@@ -7,6 +7,7 @@ class Song {
     required this.singer,
     required this.album,
     required this.interval,
+    this.cover = '',
   });
 
   /// 平台标识：kg（酷狗）/ kw / tx / wy / mg
@@ -20,6 +21,9 @@ class Song {
 
   /// mm:ss
   final String interval;
+
+  /// 专辑封面（可能为空）
+  final String cover;
 
   String get key => '$source:$id';
 
@@ -41,6 +45,7 @@ class Song {
         'singer': singer,
         'album': album,
         'interval': interval,
+        'cover': cover,
       };
 
   factory Song.fromJson(Map<String, dynamic> json) => Song(
@@ -50,6 +55,7 @@ class Song {
         singer: json['singer'] as String? ?? '',
         album: json['album'] as String? ?? '',
         interval: json['interval'] as String? ?? '00:00',
+        cover: json['cover'] as String? ?? '',
       );
 }
 

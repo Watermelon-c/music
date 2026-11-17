@@ -196,22 +196,47 @@ class _PlayerPageState extends State<PlayerPage>
                     ],
                   ),
                   child: Center(
-                    child: Container(
-                      width: 148,
-                      height: 148,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: <Color>[Color(0xFFF3E0C4), Color(0xFF8C6B47)],
-                        ),
-                      ),
-                      child: const Icon(
-                        Icons.music_note,
-                        size: 64,
-                        color: Colors.white70,
-                      ),
+                    child: ClipOval(
+                      child: song.cover.isEmpty
+                          ? Container(
+                              width: 148,
+                              height: 148,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: <Color>[
+                                    Color(0xFFF3E0C4),
+                                    Color(0xFF8C6B47)
+                                  ],
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.music_note,
+                                size: 64,
+                                color: Colors.white70,
+                              ),
+                            )
+                          : Image.network(
+                              song.cover,
+                              width: 148,
+                              height: 148,
+                              fit: BoxFit.cover,
+                              errorBuilder: (BuildContext context, Object error,
+                                  StackTrace? stack) {
+                                return Container(
+                                  width: 148,
+                                  height: 148,
+                                  color: const Color(0xFF8C6B47),
+                                  child: const Icon(
+                                    Icons.music_note,
+                                    size: 64,
+                                    color: Colors.white70,
+                                  ),
+                                );
+                              },
+                            ),
                     ),
                   ),
                 ),

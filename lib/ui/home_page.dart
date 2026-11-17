@@ -5,6 +5,7 @@ import '../app_state.dart';
 import '../models/models.dart';
 import 'rank_page.dart';
 import 'song_list_page.dart';
+import 'widgets/cover_image.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -153,10 +154,15 @@ class _HomePageState extends State<HomePage> {
       final Song song = e.value;
       return ListTile(
         leading: SizedBox(
-          width: 24,
-          child: Center(
-            child: Text('${e.key + 1}',
-                style: const TextStyle(color: Colors.black45)),
+          width: 74,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              CoverImage(url: song.cover, size: 42),
+              const SizedBox(width: 8),
+              Text('${e.key + 1}',
+                  style: const TextStyle(color: Colors.black45)),
+            ],
           ),
         ),
         title: Text(song.name, maxLines: 1, overflow: TextOverflow.ellipsis),

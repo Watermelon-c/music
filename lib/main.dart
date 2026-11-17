@@ -9,6 +9,7 @@ import 'ui/library_page.dart';
 import 'ui/player_page.dart';
 import 'ui/search_page.dart';
 import 'ui/sources_page.dart';
+import 'ui/widgets/cover_image.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -136,8 +137,8 @@ class MiniPlayer extends StatelessWidget {
           height: 62,
           child: Row(
             children: <Widget>[
-              const SizedBox(width: 14),
-              Icon(Icons.music_note, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 12),
+              CoverImage(url: song.cover, size: 40, radius: 6),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(

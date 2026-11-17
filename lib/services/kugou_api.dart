@@ -126,10 +126,21 @@ class KugouApi {
       album: '',
       interval:
           '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}',
+      cover: _coverUrl(item['album_sizable_cover']),
     );
   }
 
-  Song _toSong(Map<String, dynamic> item) {    final int seconds = (item['Duration'] as num?)?.toInt() ?? 0;
+  /// 酷狗的封面 URL 模板里带 {size} 占位，替换成想要的尺寸
+  static String _coverUrl(Object? raw) {
+    final String url = (raw?.toString() ?? '').trim();
+    if (url.isEmpty) return '';
+    return url
+        .replaceAll('{size}', '400')
+        .replaceFirst('http://', 'https://');
+  }
+
+  Song _toSong(Map<String, dynamic> item) {
+    final int seconds = (item['Duration'] as num?)?.toInt() ?? 0;
     return Song(
       source: 'kg',
       id: (item['FileHash'] as String? ?? '').toUpperCase(),
@@ -138,6 +149,7 @@ class KugouApi {
       album: _clean(item['AlbumName']),
       interval:
           '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}',
+      cover: _coverUrl(item['Image']),
     );
   }
 

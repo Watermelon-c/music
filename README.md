@@ -64,6 +64,27 @@
 > 所以上面的下载链接长期有效，有新版本重新下一次即可。
 
 
+## 固定签名（强烈建议配置）
+
+不配也能构建，但每次都是随机 debug 签名，升级必须卸载重装。配置一次即可长期受益：
+
+1. 打开仓库 **Settings → Secrets and variables → Actions → New repository secret**，依次添加 4 个：
+
+   | 名称 | 值 |
+   | --- | --- |
+   | `KEYSTORE_BASE64` | `.keys/keystore_base64.txt` 里那一整串 base64 |
+   | `KEYSTORE_PASSWORD` | `YeziMusic2026` |
+   | `KEY_ALIAS` | `yezi` |
+   | `KEY_PASSWORD` | `YeziMusic2026` |
+
+2. 配置完之后，在 **Actions → build-apk → Run workflow** 手动跑一次，产物就是固定签名了。
+3. 之后的构建都能直接覆盖安装，收藏和音源配置不会丢。
+
+> ⚠️ 务必备份 `.keys/yezi.jks`（这个目录已被 gitignore）。密钥丢了的话，以后发的包就再也覆盖不上现在装的版本，只能卸载重来。
+>
+> 构建日志里的「校验签名」步骤会打印证书指纹，SHA1 应该是
+> `32:C7:81:ED:E7:67:F2:2F:57:DE:2F:37:A2:D8:09:AC:00:DA:79:CE`。
+
 ## 第一次打开怎么用
 
 1. 进 **音源** 页 → 点一个「推荐音源」（推荐 `HelloWorld 聚合`，今天验证可用），

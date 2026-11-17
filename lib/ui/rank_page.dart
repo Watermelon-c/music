@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../models/models.dart';
+import 'widgets/cover_image.dart';
 
 class RankPage extends StatefulWidget {
   const RankPage({super.key, required this.rank});
@@ -73,10 +74,15 @@ class _RankPageState extends State<RankPage> {
               final Song song = songs[i];
               return ListTile(
                 leading: SizedBox(
-                  width: 26,
-                  child: Center(
-                    child: Text('${i + 1}',
-                        style: const TextStyle(color: Colors.black45)),
+                  width: 74,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      CoverImage(url: song.cover, size: 42),
+                      const SizedBox(width: 8),
+                      Text('${i + 1}',
+                          style: const TextStyle(color: Colors.black45)),
+                    ],
                   ),
                 ),
                 title: Text(song.name,

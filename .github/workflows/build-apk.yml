@@ -5,9 +5,12 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
-# 发布 Release 需要写权限
 permissions:
   contents: write
+
+env:
+  # 配了 KEYSTORE_BASE64 就用固定签名，没配就退回 debug 签名（仍能构建）
+  KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
 
 jobs:
   build:
@@ -30,6 +33,12 @@ jobs:
           channel: stable
           cache: true
 
+      - name: 自动递增 versionCode
+        run: |
+          BASE=$(grep -m1 '^version:' pubspec.yaml | cut -d' ' -f2 | cut -d'+' -f1)
+          sed -i "s/^version: .*/version: ${BASE}+${{ github.run_number }}/" pubspec.yaml
+          grep '^version:' pubspec.yaml
+
       - name: 生成 Android 平台文件
         run: |
           flutter --version
@@ -38,11 +47,32 @@ jobs:
           cp -r /tmp/scaffold/android ./android
           ls android/app/src/main
 
-      - name: 打补丁（联网权限 / 允许 http / 应用名）
-        run: python3 tools/patch_manifest.py android/app/src/main/AndroidManifest.xml
+      - name: 打补丁（清单 + 签名配置）
+        run: |
+          python3 tools/patch_manifest.py android/app/src/main/AndroidManifest.xml
+          python3 tools/patch_gradle.py android/app/build.gradle
+
+      - name: 写入签名密钥
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/yezi.jks
+          {
+            echo "storeFile=yezi.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/key.properties
+          ls -l android/app/yezi.jks android/key.properties
 
       - name: 拉取依赖
         run: flutter pub get
+
+      - name: 生成应用图标
+        run: dart run flutter_launcher_icons
 
       - name: 静态检查（不阻断构建，仅用于排查）
         continue-on-error: true
@@ -50,6 +80,12 @@ jobs:
 
       - name: 构建 release APK
         run: flutter build apk --release
+
+      - name: 校验签名
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs "$APK" | head -10
 
       - name: 读取版本号
         id: ver
