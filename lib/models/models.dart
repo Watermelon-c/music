@@ -53,6 +53,29 @@ class Song {
       );
 }
 
+/// 榜单 / 推荐歌单
+class RankInfo {
+  const RankInfo({
+    required this.id,
+    required this.name,
+    required this.cover,
+    required this.intro,
+  });
+
+  final int id;
+  final String name;
+  final String cover;
+  final String intro;
+
+  factory RankInfo.fromJson(Map<String, dynamic> json) => RankInfo(
+        id: (json['rankid'] as num?)?.toInt() ?? 0,
+        name: '${json['rankname'] ?? ''}',
+        cover: '${json['banner_9'] ?? json['img_9'] ?? json['imgurl'] ?? ''}'
+            .replaceAll('{size}', '400'),
+        intro: '${json['intro'] ?? ''}',
+      );
+}
+
 /// 已导入的音源
 class SourceEntry {
   SourceEntry({

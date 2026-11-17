@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models/lyric.dart';
@@ -17,6 +19,9 @@ class PresetSource {
   final String name;
   final String url;
 }
+
+/// 播放顺序
+enum PlayMode { sequence, shuffle, repeatOne }
 
 /// 内置推荐音源（来自 pdone/lx-music-source，走 GitHub 加速链接）
 const List<PresetSource> kPresetSources = <PresetSource>[
@@ -92,6 +97,7 @@ class AppState extends ChangeNotifier {
     lyricApi = LyricApi(dio);
     player = PlayerService();
     player.addListener(notifyListeners);
+    player.player.playerStateStream.listen(_onPlayerState);
   }
 
   late final Dio dio;
@@ -106,6 +112,14 @@ class AppState extends ChangeNotifier {
   List<Song> results = <Song>[];
   List<Song> favorites = <Song>[];
   List<SourceEntry> sources = <SourceEntry>[];
+  List<RankInfo> ranks = <RankInfo>[];
+  List<Song> daily = <Song>[];
+
+  bool homeLoading = false;
+  String? homeError;
+  String _dailyDate = '';
+
+  PlayMode playMode = PlayMode.sequence;
 
   String keyword = '';
   String quality = '320k';
@@ -118,6 +132,8 @@ class AppState extends ChangeNotifier {
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     quality = _prefs?.getString('quality') ?? '320k';
+    final int modeIndex = (_prefs?.getInt('playMode') ?? 0).clamp(0, 2);
+    playMode = PlayMode.values[modeIndex];
 
     final String? favRaw = _prefs?.getString('favorites');
     if (favRaw != null && favRaw.isNotEmpty) {
@@ -209,18 +225,139 @@ class AppState extends ChangeNotifier {
 
   Future<void> nextSong() async {
     if (queue.isEmpty) return;
-    final int next = (queueIndex + 1) % queue.length;
-    await play(queue[next]);
+    final Song? next = _pickNext(auto: false);
+    if (next == null) return;
+    await play(next, queue: queue, index: queueIndex);
   }
 
   Future<void> previousSong() async {
     if (queue.isEmpty) return;
     final int prev = (queueIndex - 1 + queue.length) % queue.length;
-    await play(queue[prev]);
+    await play(queue[prev], queue: queue, index: prev);
   }
 
-  Future<void> play(Song song) async {
-    _syncQueue(song);
+  /// 播放顺序：顺序 → 随机 → 单曲循环
+  Future<void> cyclePlayMode() async {
+    playMode = PlayMode.values[(playMode.index + 1) % PlayMode.values.length];
+    await _prefs?.setInt('playMode', playMode.index);
+    notifyListeners();
+  }
+
+  bool _advancing = false;
+
+  void _onPlayerState(PlayerState state) {
+    if (state.processingState == ProcessingState.completed) {
+      unawaited(_handleCompleted());
+    }
+  }
+
+  Future<void> _handleCompleted() async {
+    if (_advancing) return;
+    _advancing = true;
+    try {
+      if (playMode == PlayMode.repeatOne) {
+        await player.player.seek(Duration.zero);
+        await player.player.play();
+        return;
+      }
+      final Song? next = _pickNext(auto: true);
+      if (next != null) {
+        await play(next, queue: queue, index: queueIndex);
+      } else {
+        notice = '播放列表已经播完啦，去首页挑点别的吧';
+        notifyListeners();
+      }
+    } finally {
+      _advancing = false;
+    }
+  }
+
+  /// auto=true 时顺序播放到列表末尾会返回 null（停止），auto=false 时循环回第一首
+  Song? _pickNext({required bool auto}) {
+    if (queue.isEmpty) return null;
+
+    if (playMode == PlayMode.shuffle) {
+      if (queue.length == 1) {
+        queueIndex = 0;
+        return queue.first;
+      }
+      final Random rnd = Random();
+      int i = queueIndex;
+      while (i == queueIndex) {
+        i = rnd.nextInt(queue.length);
+      }
+      queueIndex = i;
+      return queue[i];
+    }
+
+    final int next = queueIndex + 1;
+    if (next < queue.length) {
+      queueIndex = next;
+      return queue[next];
+    }
+    if (!auto) {
+      queueIndex = 0;
+      return queue.first;
+    }
+    return null;
+  }
+
+  // -------------------------------------------------------------------- 首页
+  String _todayKey() {
+    final DateTime now = DateTime.now();
+    return '${now.year}-${now.month}-${now.day}';
+  }
+
+  Future<void> loadHome({bool force = false}) async {
+    final String today = _todayKey();
+    if (!force && daily.isNotEmpty && _dailyDate == today) return;
+
+    homeLoading = true;
+    homeError = null;
+    notifyListeners();
+
+    try {
+      if (ranks.isEmpty) ranks = await kugou.ranks();
+
+      final List<Song> pool = <Song>[];
+      for (final RankInfo r in ranks.take(3)) {
+        try {
+          final List<Song> songs = await kugou.rankSongs(r.id);
+          pool.addAll(songs.take(12));
+        } catch (_) {
+          // 单个榜单失败不影响整体
+        }
+      }
+
+      final List<Song> shuffled = List<Song>.from(pool);
+      shuffled.shuffle(Random(today.hashCode));
+      daily = shuffled.take(30).toList();
+      _dailyDate = today;
+
+      if (daily.isEmpty) homeError = '推荐数据拉取失败，下拉重试';
+    } catch (e) {
+      homeError = '首页加载失败：$e';
+    } finally {
+      homeLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> playDaily() async {
+    if (daily.isEmpty) {
+      await loadHome(force: true);
+    }
+    if (daily.isEmpty) return;
+    await play(daily.first, queue: daily, index: 0);
+  }
+
+  Future<void> play(Song song, {List<Song>? queue, int? index}) async {
+    if (queue != null) {
+      this.queue = List<Song>.from(queue);
+      queueIndex = index ?? 0;
+    } else {
+      _syncQueue(song);
+    }
 
     final List<SourceEntry> active = sources
         .where((SourceEntry s) =>

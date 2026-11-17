@@ -118,7 +118,7 @@ class _PlayerPageState extends State<PlayerPage>
                   ),
                 _buildInfo(context, app, song),
                 _buildProgress(context, player),
-                _buildControls(app),
+                _buildControls(app, song),
                 const SizedBox(height: 18),
               ],
             ),
@@ -335,12 +335,19 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  Widget _buildControls(AppState app) {
+  Widget _buildControls(AppState app, Song song) {
     final AudioPlayer player = app.player.player;
+    final bool fav = app.isFavorite(song);
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: <Widget>[
+        IconButton(
+          iconSize: 24,
+          tooltip: _modeLabel(app.playMode),
+          icon: Icon(_modeIcon(app.playMode), color: Colors.white70),
+          onPressed: () => app.cyclePlayMode(),
+        ),
         IconButton(
           iconSize: 30,
           color: Colors.white,
@@ -375,8 +382,39 @@ class _PlayerPageState extends State<PlayerPage>
           icon: const Icon(Icons.skip_next),
           onPressed: () => app.nextSong(),
         ),
+        IconButton(
+          iconSize: 24,
+          tooltip: fav ? '取消收藏' : '收藏',
+          icon: Icon(
+            fav ? Icons.favorite : Icons.favorite_border,
+            color: fav ? Colors.redAccent : Colors.white70,
+          ),
+          onPressed: () => app.toggleFavorite(song),
+        ),
       ],
     );
+  }
+
+  static IconData _modeIcon(PlayMode mode) {
+    switch (mode) {
+      case PlayMode.shuffle:
+        return Icons.shuffle;
+      case PlayMode.repeatOne:
+        return Icons.repeat_one;
+      case PlayMode.sequence:
+        return Icons.repeat;
+    }
+  }
+
+  static String _modeLabel(PlayMode mode) {
+    switch (mode) {
+      case PlayMode.shuffle:
+        return '随机播放';
+      case PlayMode.repeatOne:
+        return '单曲循环';
+      case PlayMode.sequence:
+        return '顺序播放';
+    }
   }
 
   static String _fmt(Duration d) {

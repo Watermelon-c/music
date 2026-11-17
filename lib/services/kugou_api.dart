@@ -49,8 +49,87 @@ class KugouApi {
         .toList();
   }
 
-  Song _toSong(Map<String, dynamic> item) {
-    final int seconds = (item['Duration'] as num?)?.toInt() ?? 0;
+  /// 榜单 / 推荐歌单列表
+  Future<List<RankInfo>> ranks() async {
+    final Response<String> resp = await _dio.get<String>(
+      'https://m.kugou.com/rank/list',
+      queryParameters: <String, dynamic>{'json': 'true'},
+      options: Options(
+        responseType: ResponseType.plain,
+        headers: <String, String>{
+          'User-Agent': userAgent,
+          'Referer': 'https://m.kugou.com/',
+        },
+      ),
+    );
+
+    final Map<String, dynamic> json =
+        jsonDecode(resp.data ?? '{}') as Map<String, dynamic>;
+    final Map<String, dynamic>? rank = json['rank'] as Map<String, dynamic>?;
+    final List<dynamic> list = (rank?['list'] as List<dynamic>?) ?? <dynamic>[];
+
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(RankInfo.fromJson)
+        .where((RankInfo r) => r.id != 0 && r.name.isNotEmpty)
+        .toList();
+  }
+
+  /// 榜单里的歌曲
+  Future<List<Song>> rankSongs(int rankId, {int page = 1}) async {
+    final Response<String> resp = await _dio.get<String>(
+      'https://m.kugou.com/rank/info/',
+      queryParameters: <String, dynamic>{
+        'rankid': '$rankId',
+        'page': '$page',
+        'json': 'true',
+      },
+      options: Options(
+        responseType: ResponseType.plain,
+        headers: <String, String>{
+          'User-Agent': userAgent,
+          'Referer': 'https://m.kugou.com/',
+        },
+      ),
+    );
+
+    final Map<String, dynamic> json =
+        jsonDecode(resp.data ?? '{}') as Map<String, dynamic>;
+    final Map<String, dynamic>? songs = json['songs'] as Map<String, dynamic>?;
+    final List<dynamic> list =
+        (songs?['list'] as List<dynamic>?) ?? <dynamic>[];
+
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(_rankSong)
+        .where((Song s) => s.id.isNotEmpty)
+        .toList();
+  }
+
+  Song _rankSong(Map<String, dynamic> item) {
+    final String filename = '${item['filename'] ?? ''}';
+    String singer = '';
+    String name = '${item['songname'] ?? filename}';
+
+    final int sep = filename.indexOf(' - ');
+    if (sep > 0) {
+      singer = filename.substring(0, sep).trim();
+      name = filename.substring(sep + 3).trim();
+    }
+
+    final int seconds = (item['duration'] as num?)?.toInt() ?? 0;
+    return Song(
+      source: 'kg',
+      id: '${item['hash'] ?? ''}'.toUpperCase(),
+      name: name.isEmpty ? filename : name,
+      singer: singer,
+      album: '',
+      interval:
+          '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}',
+    );
+  }
+
+  Song _toSong(Map<String, dynamic> item) {    final int seconds = (item['Duration'] as num?)?.toInt() ?? 0;
     return Song(
       source: 'kg',
       id: (item['FileHash'] as String? ?? '').toUpperCase(),

@@ -4,6 +4,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import 'app_state.dart';
 import 'models/models.dart';
+import 'ui/home_page.dart';
 import 'ui/library_page.dart';
 import 'ui/player_page.dart';
 import 'ui/search_page.dart';
@@ -56,6 +57,7 @@ class _RootShellState extends State<RootShell> {
         child: IndexedStack(
           index: _index,
           children: const <Widget>[
+            HomePage(),
             SearchPage(),
             LibraryPage(),
             SourcesPage(),
@@ -70,6 +72,7 @@ class _RootShellState extends State<RootShell> {
             selectedIndex: _index,
             onDestinationSelected: (int i) => setState(() => _index = i),
             destinations: const <NavigationDestination>[
+              NavigationDestination(icon: Icon(Icons.home_outlined), label: '首页'),
               NavigationDestination(icon: Icon(Icons.search), label: '搜索'),
               NavigationDestination(icon: Icon(Icons.favorite_border), label: '收藏'),
               NavigationDestination(icon: Icon(Icons.extension), label: '音源'),
