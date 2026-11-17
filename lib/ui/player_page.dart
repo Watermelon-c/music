@@ -100,6 +100,7 @@ class _PlayerPageState extends State<PlayerPage>
                             lyric: app.lyric,
                             player: player,
                             loading: app.lyricLoading,
+                            onTap: () => setState(() => _showLyric = false),
                           ),
                         )
                       : _buildCover(app, song),
