@@ -131,7 +131,7 @@ class AppState extends ChangeNotifier {
   // ------------------------------------------------------------------ 初始化
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
-    quality = _prefs?.getString('quality') ?? '320k';
+    quality = _prefs?.getString('quality') ?? '128k';
     final int modeIndex = (_prefs?.getInt('playMode') ?? 0).clamp(0, 2);
     playMode = PlayMode.values[modeIndex];
 
@@ -204,7 +204,73 @@ class AppState extends ChangeNotifier {
   bool lyricLoading = false;
 
   final Map<String, _CachedUrl> _urlCache = <String, _CachedUrl>{};
+  final Map<String, int> _sourceScore = <String, int>{};
   int _playToken = 0;
+
+  /// 按历史成功率排序，只取前 8 个音源并发，避免 14 个全打出去互相拖慢
+  List<SourceEntry> _rankedSources(List<SourceEntry> active) {
+    final List<SourceEntry> list = List<SourceEntry>.from(active);
+    list.sort((SourceEntry a, SourceEntry b) =>
+        (_sourceScore[b.id] ?? 0).compareTo(_sourceScore[a.id] ?? 0));
+    return list.take(8).toList();
+  }
+
+  Future<String> _attempt(SourceEntry s, Song song, String q) {
+    return host
+        .resolve(
+          sourceId: s.id,
+          platform: song.source,
+          quality: q,
+          musicInfo: song.toMusicInfo(),
+        )
+        .then((String url) {
+      _sourceScore[s.id] = (_sourceScore[s.id] ?? 0) + 1;
+      return url;
+    }, onError: (Object error) {
+      _sourceScore[s.id] = (_sourceScore[s.id] ?? 0) - 1;
+      throw error;
+    });
+  }
+
+  /// 当前歌开始播后，后台把下一首的直链解析好缓存起来，切歌时省掉解析时间
+  void _prefetchNext() {
+    if (queue.isEmpty || playMode == PlayMode.shuffle) return;
+    final int nextIndex = queueIndex + 1;
+    if (nextIndex >= queue.length) return;
+    final Song next = queue[nextIndex];
+    final String key = '${next.key}|$quality';
+    if (_urlCache.containsKey(key)) return;
+
+    unawaited(Future<void>.delayed(
+      const Duration(seconds: 3),
+      () => _resolveIntoCache(next, key),
+    ));
+  }
+
+  Future<void> _resolveIntoCache(Song song, String key) async {
+    if (_urlCache.containsKey(key)) return;
+
+    final List<SourceEntry> active = sources
+        .where((SourceEntry s) =>
+            s.enabled &&
+            (s.platforms.isEmpty || s.platforms.contains(song.source)))
+        .toList();
+    if (active.isEmpty) return;
+
+    final List<Future<String>> attempts = <Future<String>>[
+      for (final SourceEntry s in _rankedSources(active))
+        _attempt(s, song, quality),
+    ];
+
+    try {
+      final String url =
+          await _firstSuccess(attempts).timeout(const Duration(seconds: 12));
+      _urlCache[key] = _CachedUrl(url, DateTime.now());
+      if (_urlCache.length > 60) _urlCache.clear();
+    } catch (_) {
+      // 预解析失败无所谓，等真正切歌时再解析
+    }
+  }
 
   void _syncQueue(Song song) {
     final int i = results.indexWhere((Song s) => s.key == song.key);
@@ -392,33 +458,24 @@ class AppState extends ChangeNotifier {
       lyricLoading = false;
       notifyListeners();
       unawaited(_loadLyric(song, token));
+      _prefetchNext();
       return;
     }
 
-    // 2) 所有音源 + 两档音质并发抢答，谁先返回有效地址就用谁
+    // 2) 音源按成功率排序后并发抢答，谁先返回有效地址就用谁
     final List<String> qualities = <String>[
       quality,
       if (quality != '128k') '128k',
     ];
-    final List<Future<String>> attempts = <Future<String>>[];
-    final List<String> labels = <String>[];
-    for (final String q in qualities) {
-      for (final SourceEntry s in active) {
-        labels.add('${s.name}($q)');
-        attempts.add(
-          host.resolve(
-            sourceId: s.id,
-            platform: song.source,
-            quality: q,
-            musicInfo: song.toMusicInfo(),
-          ),
-        );
-      }
-    }
+    final List<SourceEntry> ranked = _rankedSources(active);
+    final List<Future<String>> attempts = <Future<String>>[
+      for (final String q in qualities)
+        for (final SourceEntry s in ranked) _attempt(s, song, q),
+    ];
 
     try {
       final String url = await _firstSuccess(attempts)
-          .timeout(const Duration(seconds: 18));
+          .timeout(const Duration(seconds: 14));
       if (token != _playToken) return;
 
       _urlCache[cacheKey] = _CachedUrl(url, DateTime.now());
@@ -433,6 +490,7 @@ class AppState extends ChangeNotifier {
       lyricLoading = false;
       notifyListeners();
       unawaited(_loadLyric(song, token));
+      _prefetchNext();
     } catch (e) {
       if (token != _playToken) return;
       busy = false;

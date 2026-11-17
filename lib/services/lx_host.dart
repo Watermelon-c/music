@@ -86,7 +86,7 @@ class LxHost {
     await c.runJavaScript(js);
 
     try {
-      return await waiter.future.timeout(const Duration(seconds: 20));
+      return await waiter.future.timeout(const Duration(seconds: 15));
     } finally {
       _resolveWaiters.remove(rid);
     }
