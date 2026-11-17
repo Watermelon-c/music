@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../models/models.dart';
 import 'lyric_view.dart';
+import 'queue_page.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key});
@@ -154,6 +155,15 @@ class _PlayerPageState extends State<PlayerPage>
                 ),
             ],
           ),
+        ),
+        IconButton(
+          tooltip: '播放列表',
+          icon: const Icon(Icons.queue_music, color: Colors.white),
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const QueuePage()),
+            );
+          },
         ),
         IconButton(
           tooltip: _showLyric ? '看封面' : '看歌词',

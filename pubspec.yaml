@@ -1,7 +1,7 @@
 name: lxmusic_app
 description: 个人自用的 LX 音源音乐播放器（酷狗搜索 + 自定义源解析 + 在线播放）
 publish_to: 'none'
-version: 1.3.0+7
+version: 1.3.1+12
 
 environment:
   sdk: '>=3.4.0 <4.0.0'

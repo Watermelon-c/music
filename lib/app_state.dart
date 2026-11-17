@@ -302,6 +302,49 @@ class AppState extends ChangeNotifier {
     await play(queue[prev], queue: queue, index: prev);
   }
 
+  /// 直接播放队列里的第 index 首
+  Future<void> playAt(int index) async {
+    if (index < 0 || index >= queue.length) return;
+    await play(queue[index], queue: queue, index: index);
+  }
+
+  /// 从队列移除一首；移除的是当前播放的歌就顺延到下一首
+  Future<void> removeFromQueue(int index) async {
+    if (index < 0 || index >= queue.length) return;
+
+    final bool wasCurrent = index == queueIndex;
+    queue = List<Song>.from(queue)..removeAt(index);
+
+    if (queue.isEmpty) {
+      queueIndex = -1;
+      await player.stopAndClear();
+      notifyListeners();
+      return;
+    }
+
+    if (index < queueIndex) {
+      queueIndex -= 1;
+      notifyListeners();
+      return;
+    }
+
+    if (wasCurrent) {
+      if (queueIndex >= queue.length) queueIndex = queue.length - 1;
+      await play(queue[queueIndex], queue: queue, index: queueIndex);
+      return;
+    }
+
+    notifyListeners();
+  }
+
+  /// 清空队列并停止播放
+  Future<void> clearQueue() async {
+    queue = <Song>[];
+    queueIndex = -1;
+    await player.stopAndClear();
+    notifyListeners();
+  }
+
   /// 播放顺序：顺序 → 随机 → 单曲循环
   Future<void> cyclePlayMode() async {
     playMode = PlayMode.values[(playMode.index + 1) % PlayMode.values.length];

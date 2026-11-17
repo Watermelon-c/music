@@ -53,6 +53,12 @@ class PlayerService extends ChangeNotifier {
     await player.seek(Duration(milliseconds: (seconds * 1000).round()));
   }
 
+  Future<void> stopAndClear() async {
+    await player.stop();
+    current = null;
+    notifyListeners();
+  }
+
   Future<void> next() async {
     if (player.hasNext) {
       await player.seekToNext();
