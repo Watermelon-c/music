@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../models/models.dart';
 import 'rank_page.dart';
+import 'song_list_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -79,7 +80,7 @@ class _HomePageState extends State<HomePage> {
         children: <Widget>[
           _DailyCard(
             count: app.daily.length,
-            onTap: app.playDaily,
+            onTap: () => _openDaily(app),
           ),
           ...app.ranks.take(2).map((RankInfo r) => _CoverCard(
                 title: r.name,
@@ -147,7 +148,8 @@ class _HomePageState extends State<HomePage> {
     }
 
     final AppState state = app;
-    return app.daily.take(10).toList().asMap().entries.map((MapEntry<int, Song> e) {
+    final List<Widget> tiles =
+        app.daily.take(10).toList().asMap().entries.map((MapEntry<int, Song> e) {
       final Song song = e.value;
       return ListTile(
         leading: SizedBox(
@@ -168,6 +170,21 @@ class _HomePageState extends State<HomePage> {
         onTap: () => state.play(song, queue: state.daily, index: e.key),
       );
     }).toList();
+
+    tiles.add(
+      ListTile(
+        title: Center(
+          child: Text(
+            '查看全部 ${app.daily.length} 首',
+            style: const TextStyle(fontSize: 13, color: Colors.black54),
+          ),
+        ),
+        trailing: const Icon(Icons.chevron_right, size: 18),
+        onTap: () => _openDaily(app),
+      ),
+    );
+
+    return tiles;
   }
 
   Widget _cover(String url, double width, double height) {
@@ -198,6 +215,22 @@ class _HomePageState extends State<HomePage> {
   void _openRank(RankInfo rank) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => RankPage(rank: rank)),
+    );
+  }
+
+  Future<void> _openDaily(AppState app) async {
+    if (app.daily.isEmpty) {
+      await app.loadHome(force: true);
+    }
+    if (!mounted || app.daily.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SongListPage(
+          title: '每日推荐',
+          songs: app.daily,
+          subtitle: '按今天的日期挑的 ${app.daily.length} 首，明天会换一批',
+        ),
+      ),
     );
   }
 }
@@ -232,12 +265,12 @@ class _DailyCard extends StatelessWidget {
             const Text('每日推荐',
                 style: TextStyle(color: Colors.white, fontSize: 16)),
             const SizedBox(height: 4),
-            Text('今日精选 ${count > 0 ? count : '…'} 首',
+            Text('共 ${count > 0 ? count : '…'} 首 · 点开歌单',
                 style: const TextStyle(color: Colors.white70, fontSize: 12)),
             const SizedBox(height: 8),
             const Align(
               alignment: Alignment.centerRight,
-              child: Icon(Icons.play_circle_fill,
+              child: Icon(Icons.navigate_next,
                   color: Colors.white, size: 30),
             ),
           ],
